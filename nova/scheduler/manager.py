@@ -380,19 +380,22 @@ class SchedulerManager(manager.Manager):
                     continue
 
                 alloc_reqs = alloc_reqs_by_rp_uuid[cn_uuid]
-                # TODO(jaypipes): Loop through all allocation_requests instead
-                # of just trying the first one. For now, since we'll likely
-                # want to order the allocation_requests in the future based on
-                # information in the provider summaries, we'll just try to
-                # claim resources using the first allocation_request
-                alloc_req = alloc_reqs[0]
-                if utils.claim_resources(
-                    elevated, self.placement_client, spec_obj, instance_uuid,
-                    alloc_req,
-                    allocation_request_version=allocation_request_version,
-                ):
-                    claimed_host = host
-                    break
+                # Loop through all allocation_requests for that host.
+                for alloc_req in alloc_reqs:
+                    if utils.claim_resources(
+                        elevated, self.placement_client, spec_obj,
+                        instance_uuid, alloc_req,
+                        allocation_request_version=allocation_request_version,
+                    ):
+                        claimed_host = host
+                        break
+                else:
+                    # All the allocation requests from that host were not
+                    # accepted, we need to test another host.
+                    continue
+                # One allocation request successfully claimed. We don't need
+                # to test all the other hosts.
+                break
 
             if claimed_host is None:
                 # We weren't able to claim resources in the placement API

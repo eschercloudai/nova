@@ -20,7 +20,6 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import uuidutils
 
-from nova.compute import instance_actions
 import nova.conf
 from nova import context
 from nova import objects
@@ -281,31 +280,7 @@ class VGPUTests(VGPUTestBase):
         # Asking to multicreate two instances, each of them asking for 8 vGPU
         body['min_count'] = 2
         server = self.api.post_server({'server': body})
-        # But... we fail miserably because of bug #1874664
-        # FIXME(sbauza): Change this once we fix the above bug
-        server = self._wait_for_state_change(server, 'ERROR')
-        self.assertIn('fault', server)
-        self.assertIn('No valid host', server['fault']['message'])
-        self.assertEqual('', server['hostId'])
-        # Assert the "create" instance action exists and is failed.
-        actions = self.api.get_instance_actions(server['id'])
-        self.assertEqual(1, len(actions), actions)
-        action = actions[0]
-        self.assertEqual(instance_actions.CREATE, action['action'])
-        self.assertEqual('Error', action['message'])
-        # Get the events. There should be one with an Error result.
-        action = self.api.api_get(
-            '/servers/%s/os-instance-actions/%s' %
-            (server['id'], action['request_id'])).body['instanceAction']
-        events = action['events']
-        self.assertEqual(1, len(events), events)
-        event = events[0]
-        self.assertEqual('conductor_schedule_and_build_instances',
-                         event['event'])
-        self.assertEqual('Error', event['result'])
-        # Normally non-admins cannot see the event traceback but we enabled
-        # that via policy in setUp so assert something was recorded.
-        self.assertIn('select_destinations', event['traceback'])
+        server = self._wait_for_state_change(server, 'ACTIVE')
 
 
 class VGPUMultipleTypesTests(VGPUTestBase):
