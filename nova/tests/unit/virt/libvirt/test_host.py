@@ -16,6 +16,7 @@
 
 import os
 
+import ddt
 import eventlet
 from eventlet import greenthread
 from eventlet import tpool
@@ -71,11 +72,10 @@ class HostTestCase(test.NoDBTestCase):
         self.useFixture(nova_fixtures.LibvirtFixture())
         self.host = host.Host("qemu:///system")
 
-    @mock.patch("nova.virt.libvirt.host.Host._init_events")
-    def test_repeat_initialization(self, mock_init_events):
+    def test_repeat_initialization(self):
         for i in range(3):
             self.host.initialize()
-        mock_init_events.assert_called_once_with()
+        self.host._init_events.assert_called_once_with()
 
     @mock.patch.object(fakelibvirt.virConnect, "registerCloseCallback")
     def test_close_callback(self, mock_close):
@@ -1113,8 +1113,9 @@ Active:          8381604 kB
         expect_vf = ["rx", "tx", "sg", "tso", "gso", "gro", "rxvlan", "txvlan"]
         self.assertEqual(expect_vf, actualvf)
 
-    @mock.patch.object(pci_utils, 'get_ifname_by_pci_address')
-    def test_get_pcidev_info_non_nic(self, mock_get_ifname):
+    def test_get_pcidev_info_non_nic(self):
+        pci_utils.get_mac_by_pci_address.side_effect = (
+            exception.PciDeviceNotFoundById('0000:04:00.3'))
         dev_name = "pci_0000_04_11_7"
         pci_dev = fakelibvirt.NodeDevice(
             self.host._get_connection(),
@@ -1128,11 +1129,10 @@ Active:          8381604 kB
             'parent_addr': '0000:04:00.3',
         }
         self.assertEqual(expect_vf, actual_vf)
-        mock_get_ifname.assert_not_called()
+        pci_utils.get_ifname_by_pci_address.assert_not_called()
 
-    @mock.patch.object(pci_utils, 'get_ifname_by_pci_address',
-                return_value='ens1')
-    def test_get_pcidev_info(self, mock_get_ifname):
+    def test_get_pcidev_info(self):
+        pci_utils.get_ifname_by_pci_address.return_value = 'ens1'
         devs = {
             "pci_0000_04_00_3", "pci_0000_04_10_7", "pci_0000_04_11_7",
             "pci_0000_04_00_1", "pci_0000_03_00_0", "pci_0000_03_00_1",
@@ -1156,9 +1156,9 @@ Active:          8381604 kB
             dev for dev in node_devs.values() if dev.name() in devs]
 
         name = "pci_0000_04_00_3"
-        actual_vf = self.host._get_pcidev_info(
+        actual_pf = self.host._get_pcidev_info(
             name, node_devs[name], net_devs, [], [])
-        expect_vf = {
+        expect_pf = {
             "dev_id": "pci_0000_04_00_3",
             "address": "0000:04:00.3",
             "product_id": '1521',
@@ -1166,8 +1166,10 @@ Active:          8381604 kB
             "vendor_id": '8086',
             "label": 'label_8086_1521',
             "dev_type": obj_fields.PciDeviceType.SRIOV_PF,
+            # value defined in the LibvirtFixture
+            "mac_address": "52:54:00:1e:59:c6",
             }
-        self.assertEqual(expect_vf, actual_vf)
+        self.assertEqual(expect_pf, actual_pf)
 
         name = "pci_0000_04_10_7"
         actual_vf = self.host._get_pcidev_info(
@@ -1222,9 +1224,9 @@ Active:          8381604 kB
         self.assertEqual(expect_vf, actual_vf)
 
         name = "pci_0000_03_00_0"
-        actual_vf = self.host._get_pcidev_info(
+        actual_pf = self.host._get_pcidev_info(
             name, node_devs[name], net_devs, [], [])
-        expect_vf = {
+        expect_pf = {
             "dev_id": "pci_0000_03_00_0",
             "address": "0000:03:00.0",
             "product_id": '1013',
@@ -1232,13 +1234,15 @@ Active:          8381604 kB
             "vendor_id": '15b3',
             "label": 'label_15b3_1013',
             "dev_type": obj_fields.PciDeviceType.SRIOV_PF,
+            # value defined in the LibvirtFixture
+            "mac_address": "52:54:00:1e:59:c6",
             }
-        self.assertEqual(expect_vf, actual_vf)
+        self.assertEqual(expect_pf, actual_pf)
 
         name = "pci_0000_03_00_1"
-        actual_vf = self.host._get_pcidev_info(
+        actual_pf = self.host._get_pcidev_info(
             name, node_devs[name], net_devs, [], [])
-        expect_vf = {
+        expect_pf = {
             "dev_id": "pci_0000_03_00_1",
             "address": "0000:03:00.1",
             "product_id": '1013',
@@ -1246,8 +1250,10 @@ Active:          8381604 kB
             "vendor_id": '15b3',
             "label": 'label_15b3_1013',
             "dev_type": obj_fields.PciDeviceType.SRIOV_PF,
+            # value defined in the LibvirtFixture
+            "mac_address": "52:54:00:1e:59:c6",
             }
-        self.assertEqual(expect_vf, actual_vf)
+        self.assertEqual(expect_pf, actual_pf)
 
         # Parent PF with a VPD cap.
         name = "pci_0000_82_00_0"
@@ -1264,6 +1270,8 @@ Active:          8381604 kB
             "capabilities": {
                 # Should be obtained from the parent PF in this case.
                 "vpd": {"card_serial_number": "MT2113X00000"}},
+            # value defined in the LibvirtFixture
+            "mac_address": "52:54:00:1e:59:c6",
         }
         self.assertEqual(expect_pf, actual_pf)
 
@@ -1928,6 +1936,7 @@ class TestLibvirtSEV(test.NoDBTestCase):
         self.host = host.Host("qemu:///system")
 
 
+@ddt.ddt
 class TestLibvirtSEVUnsupported(TestLibvirtSEV):
     @mock.patch.object(os.path, 'exists', return_value=False)
     def test_kernel_parameter_missing(self, fake_exists):
@@ -1935,19 +1944,26 @@ class TestLibvirtSEVUnsupported(TestLibvirtSEV):
         fake_exists.assert_called_once_with(
             '/sys/module/kvm_amd/parameters/sev')
 
+    @ddt.data(
+        ('0\n', False),
+        ('N\n', False),
+        ('1\n', True),
+        ('Y\n', True),
+    )
+    @ddt.unpack
     @mock.patch.object(os.path, 'exists', return_value=True)
-    @mock.patch('builtins.open', mock.mock_open(read_data="0\n"))
-    def test_kernel_parameter_zero(self, fake_exists):
-        self.assertFalse(self.host._kernel_supports_amd_sev())
-        fake_exists.assert_called_once_with(
-            '/sys/module/kvm_amd/parameters/sev')
-
-    @mock.patch.object(os.path, 'exists', return_value=True)
-    @mock.patch('builtins.open', mock.mock_open(read_data="1\n"))
-    def test_kernel_parameter_one(self, fake_exists):
-        self.assertTrue(self.host._kernel_supports_amd_sev())
-        fake_exists.assert_called_once_with(
-            '/sys/module/kvm_amd/parameters/sev')
+    def test_kernel_parameter(
+        self, sev_param_value, expected_support, mock_exists
+    ):
+        with mock.patch(
+            'builtins.open', mock.mock_open(read_data=sev_param_value)
+        ):
+            self.assertIs(
+                expected_support,
+                self.host._kernel_supports_amd_sev()
+            )
+            mock_exists.assert_called_once_with(
+                '/sys/module/kvm_amd/parameters/sev')
 
     @mock.patch.object(os.path, 'exists', return_value=True)
     @mock.patch('builtins.open', mock.mock_open(read_data="1\n"))

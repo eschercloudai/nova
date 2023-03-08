@@ -1242,6 +1242,20 @@ class ComputeManager(manager.Manager):
                           'updated.', instance=instance)
             self._set_instance_obj_error_state(instance)
             return
+        except exception.PciDeviceNotFoundById:
+            # This is bug 1981813 where the bound port vnic_type has changed
+            # from direct to macvtap. Nova does not support that and it
+            # already printed an ERROR when the change is detected during
+            # _heal_instance_info_cache. Now we print an ERROR again and skip
+            # plugging the vifs but let the service startup continue to init
+            # the other instances
+            LOG.exception(
+                'Virtual interface plugging failed for instance. Probably the '
+                'vnic_type of the bound port has been changed. Nova does not '
+                'support such change.',
+                instance=instance
+            )
+            return
 
         if instance.task_state == task_states.RESIZE_MIGRATING:
             # We crashed during resize/migration, so roll back for safety
@@ -10967,6 +10981,9 @@ class ComputeManager(manager.Manager):
             if profile.get('vf_num'):
                 profile['vf_num'] = pci_utils.get_vf_num_by_pci_address(
                     pci_dev.address)
+
+            if pci_dev.mac_address:
+                profile['device_mac_address'] = pci_dev.mac_address
 
             mig_vif.profile = profile
             LOG.debug("Updating migrate VIF profile for port %(port_id)s:"

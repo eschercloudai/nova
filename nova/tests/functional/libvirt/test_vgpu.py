@@ -48,11 +48,11 @@ class VGPUTestBase(base.ServersTestBase):
 
     def setUp(self):
         super(VGPUTestBase, self).setUp()
-        self.useFixture(fixtures.MockPatch(
-            'nova.virt.libvirt.LibvirtDriver._get_local_gb_info',
-            return_value={'total': 128,
-                          'used': 44,
-                          'free': 84}))
+        libvirt_driver.LibvirtDriver._get_local_gb_info.return_value = {
+            'total': 128,
+            'used': 44,
+            'free': 84,
+        }
         self.useFixture(fixtures.MockPatch(
             'nova.privsep.libvirt.create_mdev',
             side_effect=self._create_mdev))
@@ -112,8 +112,8 @@ class VGPUTestBase(base.ServersTestBase):
                                                    parent=libvirt_parent)})
         return uuid
 
-    def start_compute(self, hostname):
-        hostname = super().start_compute(
+    def start_compute_with_vgpu(self, hostname):
+        hostname = self.start_compute(
             pci_info=fakelibvirt.HostPCIDevicesInfo(
                 num_pci=0, num_pfs=0, num_vfs=0, num_mdevcap=2,
             ),
@@ -196,7 +196,7 @@ class VGPUTests(VGPUTestBase):
             enabled_mdev_types=fakelibvirt.NVIDIA_11_VGPU_TYPE,
             group='devices')
 
-        self.compute1 = self.start_compute('host1')
+        self.compute1 = self.start_compute_with_vgpu('host1')
 
     def assert_vgpu_usage_for_compute(self, compute, expected):
         self.assert_mdev_usage(compute, expected_amount=expected)
@@ -210,7 +210,7 @@ class VGPUTests(VGPUTestBase):
 
     def test_resize_servers_with_vgpu(self):
         # Add another compute for the sake of resizing
-        self.compute2 = self.start_compute('host2')
+        self.compute2 = self.start_compute_with_vgpu('host2')
         server = self._create_server(
             image_uuid='155d900f-4e14-4e4c-a73d-069cbf4541e6',
             flavor_id=self.flavor, host=self.compute1.host,
@@ -312,7 +312,7 @@ class VGPUMultipleTypesTests(VGPUTestBase):
         # Prepare traits for later on
         self._create_trait('CUSTOM_NVIDIA_11')
         self._create_trait('CUSTOM_NVIDIA_12')
-        self.compute1 = self.start_compute('host1')
+        self.compute1 = self.start_compute_with_vgpu('host1')
 
     def test_create_servers_with_vgpu(self):
         self._create_server(
@@ -344,13 +344,12 @@ class VGPUMultipleTypesTests(VGPUTestBase):
 
     def test_create_servers_with_specific_type(self):
         # Regenerate the PCI addresses so both pGPUs now support nvidia-12
-        connection = self.computes[
-            self.compute1.host].driver._host.get_connection()
-        connection.pci_info = fakelibvirt.HostPCIDevicesInfo(
+        pci_info = fakelibvirt.HostPCIDevicesInfo(
             num_pci=0, num_pfs=0, num_vfs=0, num_mdevcap=2,
             multiple_gpu_types=True)
         # Make a restart to update the Resource Providers
-        self.compute1 = self.restart_compute_service(self.compute1)
+        self.compute1 = self.restart_compute_service(
+            self.compute1.host, pci_info=pci_info, keep_hypervisor_state=False)
         pgpu1_rp_uuid = self._get_provider_uuid_by_name(
             self.compute1.host + '_' + fakelibvirt.MDEVCAP_DEV1_PCI_ADDR)
         pgpu2_rp_uuid = self._get_provider_uuid_by_name(
@@ -426,7 +425,7 @@ class DifferentMdevClassesTests(VGPUTestBase):
                    group='mdev_nvidia-12')
         self.flags(mdev_class='CUSTOM_NOTVGPU', group='mdev_mlx5_core')
 
-        self.compute1 = self.start_compute('host1')
+        self.compute1 = self.start_compute_with_vgpu('host1')
         # Regenerate the PCI addresses so they can support both mlx5 and
         # nvidia-12 types
         connection = self.computes[
@@ -435,7 +434,7 @@ class DifferentMdevClassesTests(VGPUTestBase):
             num_pci=0, num_pfs=0, num_vfs=0, num_mdevcap=2,
             generic_types=True)
         # Make a restart to update the Resource Providers
-        self.compute1 = self.restart_compute_service(self.compute1)
+        self.compute1 = self.restart_compute_service('host1')
 
     def test_create_servers_with_different_mdev_classes(self):
         physdev1_rp_uuid = self._get_provider_uuid_by_name(
@@ -473,7 +472,7 @@ class DifferentMdevClassesTests(VGPUTestBase):
 
     def test_resize_servers_with_mlx5(self):
         # Add another compute for the sake of resizing
-        self.compute2 = self.start_compute('host2')
+        self.compute2 = self.start_compute_with_vgpu('host2')
         # Regenerate the PCI addresses so they can support both mlx5 and
         # nvidia-12 types
         connection = self.computes[
@@ -482,7 +481,7 @@ class DifferentMdevClassesTests(VGPUTestBase):
             num_pci=0, num_pfs=0, num_vfs=0, num_mdevcap=2,
             generic_types=True)
         # Make a restart to update the Resource Providers
-        self.compute2 = self.restart_compute_service(self.compute2)
+        self.compute2 = self.restart_compute_service('host2')
 
         # Use the new flavor for booting
         server = self._create_server(
